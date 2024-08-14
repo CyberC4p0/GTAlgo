@@ -1,0 +1,75 @@
+/@version=5
+indicator('GTAlgo v2', overlay=true, max_bars_back=300, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+bool overridesym_pvsra = input.bool(group='PVSRA', title='Override chart symbol?', defval=false, inline='pvsra')
+string pvsra_sym = input.symbol(group='PVSRA', title='', defval='INDEX:BTCUSD', tooltip='You can use INDEX:BTCUSD or you can combine multiple feeds, for example \'(BINANCE:BTCUSDT+COINBASE:BTCUSD)\'. Note that adding too many will slow things down.', inline='pvsra')
+
+pvsra_security(sresolution, sseries) =>
+    request.security(overridesym_pvsra ? pvsra_sym : syminfo.tickerid, sresolution, sseries[barstate.isrealtime ? 1 : 0], barmerge.gaps_off, barmerge.lookahead_off)
+
+pvsra_security_1 = pvsra_security('', volume)
+pvsra_volume = overridesym_pvsra == true ? pvsra_security_1 : volume
+pvsra_security_2 = pvsra_security('', high)
+pvsra_high = overridesym_pvsra == true ? pvsra_security_2 : high
+pvsra_security_3 = pvsra_security('', low)
+pvsra_low = overridesym_pvsra == true ? pvsra_security_3 : low
+pvsra_security_4 = pvsra_security('', close)
+pvsra_close = overridesym_pvsra == true ? pvsra_security_4 : close
+pvsra_security_5 = pvsra_security('', open)
+pvsra_open = overridesym_pvsra == true ? pvsra_security_5 : open
+
+sum_1 = math.sum(pvsra_volume, 10)
+sum_2 = math.sum(volume, 10)
+av = overridesym_pvsra == true ? sum_1 / 10 : sum_2 / 10
+value2 = overridesym_pvsra == true ? pvsra_volume * (pvsra_high - pvsra_low) : volume * (high - low)
+hivalue2 = ta.highest(value2, 10)
+iff_1 = pvsra_volume >= av * 1.5 ? 2 : 0
+iff_2 = pvsra_volume >= av * 2 or value2 >= hivalue2 ? 1 : iff_1
+iff_3 = volume >= av * 1.5 ? 2 : 0
+iff_4 = volume >= av * 2 or value2 >= hivalue2 ? 1 : iff_3
+va = overridesym_pvsra == true ? iff_2 : iff_4
+
+isBull = overridesym_pvsra == true ? pvsra_close > pvsra_open : close > open
+
+CUColor = color.lime 
+CDColor = color.red  
+AUColor = color.rgb(33, 170, 255)  
+ADColor = color.fuchsia  
+NUColor = #9b9b9b
+NDColor = #787b86
+
+iff_5 = va == 2 ? AUColor : NUColor
+iff_6 = va == 1 ? CUColor : iff_5
+iff_7 = va == 2 ? ADColor : NDColor
+iff_8 = va == 1 ? CDColor : iff_7
+candleColor = isBull ? iff_6 : iff_8
+
+
+// EMA
+ema_length = input.int(group='Signals', title='EMA length', defval=50, minval=1)
+ema_source = input.source(group='Signals', title='EMA source', defval=close)
+ema_color = input.color(group='Signals', title='EMA color', defval=color.yellow)
+ema_value = ta.ema(ema_source, ema_length)
+plot(ema_value, title='EMA', color=ema_color, linewidth=2)
+buy_signal_ema = va == 1 and isBull and pvsra_close > ema_value and pvsra_open < ema_value
+sell_signal_ema = va == 1 and not isBull and pvsra_close < ema_value and pvsra_open > ema_value
+plotshape(buy_signal_ema, title='Buy', style=shape.diamond, location=location.belowbar, size=size.small, color=color.rgb(0, 255, 221), text='Buy')
+plotshape(sell_signal_ema, title='Buy', style=shape.triangledown, location=location.abovebar, size=size.small, color=color.rgb(255, 123, 123), text='Sell')
+
+// ATR
+atr_length = input(13, title='ATR Length', group='Signals')
+atr_multiplier = input(0.9, title='ATR Multiplier', group='Signals')
+atr_value = ta.atr(atr_length)
+atr_threshold = atr_value * atr_multiplier
+buy_signal_atr = pvsra_close > pvsra_open and pvsra_close[1] <= pvsra_open[1] and close > close[1] + atr_threshold
+sell_signal_atr = pvsra_close < pvsra_open and pvsra_close[1] >= pvsra_open[1] and close < close[1] - atr_threshold
+barcolor(buy_signal_atr ? color.new(#00fff2, 0) : sell_signal_atr ? color.new(#d900ff, 0) : na)
+plotshape(buy_signal_atr, title='Buy Signal', style=shape.diamond, location=location.belowbar, size=size.small, color=color.rgb(0, 255, 221), text='Buy')
+plotshape(sell_signal_atr, title='Sell Signal', style=shape.triangledown, location=location.abovebar, size=size.small, color=color.rgb(255, 123, 123), text='Sell')
+
+// "Next Move" signal every 26 candles
+next_move_signal = bar_index % 26 == 0
+// Plotting "Next Move" label with a whale emoji
+var label whaleLabel = na
+if (next_move_signal)
+    whaleLabel := label.new(bar_index, low, text="🐋", color=color.rgb(255, 255, 255, 100), textcolor=color.rgb(255, 255, 255), size=size.huge, style=label.style_label_up)
